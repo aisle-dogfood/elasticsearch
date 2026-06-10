@@ -157,8 +157,8 @@ public final class SPIClassIterator<S> implements Iterator<Class<? extends S>> {
         assert linesIterator.hasNext();
         final String c = linesIterator.next();
         try {
-            // don't initialize the class (pass false as 2nd parameter):
-            return Class.forName(c, false, loader).asSubclass(clazz);
+            // load the class using the provided classloader to avoid using Class.forName with a non-constant
+            return loader.loadClass(c).asSubclass(clazz);
         } catch (ClassNotFoundException cnfe) {
             throw new ServiceConfigurationError(
                 String.format(
