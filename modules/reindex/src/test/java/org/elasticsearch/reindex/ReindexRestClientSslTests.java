@@ -22,6 +22,7 @@ import org.elasticsearch.common.settings.SecureString;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.ssl.PemKeyConfig;
 import org.elasticsearch.common.ssl.PemTrustConfig;
+import org.elasticsearch.common.ssl.SslConfigException;
 import org.elasticsearch.core.PathUtils;
 import org.elasticsearch.core.SuppressForbidden;
 import org.elasticsearch.env.Environment;
@@ -145,16 +146,20 @@ public class ReindexRestClientSslTests extends ESTestCase {
         }
     }
 
-    public void testClientSucceedsWithVerificationDisabled() throws IOException {
-        assumeFalse("Cannot disable verification in FIPS JVM", inFipsJvm());
-        final List<Thread> threads = new ArrayList<>();
-        final Settings.Builder builder = Settings.builder().put("path.home", createTempDir()).put("reindex.ssl.verification_mode", "NONE");
-        final Settings settings = builder.build();
-        final Environment environment = TestEnvironment.newEnvironment(settings);
-        final ReindexSslConfig ssl = new ReindexSslConfig(settings, environment, mock(ResourceWatcherService.class));
-        try (RestClient client = Reindexer.buildRestClient(getRemoteInfo(), ssl, 1L, threads)) {
-            final Response response = client.performRequest(new Request("GET", "/"));
-            assertThat(response.getStatusLine().getStatusCode(), Matchers.is(200));
+    public void testClientRejectsVerificationModesWithoutHostnameVerification() {
+        for (String verificationMode : List.of("NONE", "CERTIFICATE")) {
+            final Settings settings = Settings.builder()
+                .put("path.home", createTempDir())
+                .put("reindex.ssl.verification_mode", verificationMode)
+                .build();
+            final Environment environment = TestEnvironment.newEnvironment(settings);
+            final SslConfigException exception = expectThrows(
+                SslConfigException.class,
+                () -> new ReindexSslConfig(settings, environment, mock(ResourceWatcherService.class))
+            );
+            assertThat(exception.getMessage(), Matchers.containsString("reindex-from-remote requires hostname verification"));
+            assertThat(exception.getMessage(), Matchers.containsString("reindex.ssl.verification_mode"));
+            assertThat(exception.getMessage(), Matchers.containsString(verificationMode));
         }
     }
 
