@@ -10,13 +10,13 @@
 package org.elasticsearch.reindex;
 
 import org.apache.http.conn.ssl.DefaultHostnameVerifier;
-import org.apache.http.conn.ssl.NoopHostnameVerifier;
 import org.apache.http.nio.conn.ssl.SSLIOSessionStrategy;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.settings.SecureSetting;
 import org.elasticsearch.common.settings.SecureString;
 import org.elasticsearch.common.settings.Setting;
 import org.elasticsearch.common.settings.Settings;
+import org.elasticsearch.common.ssl.SslConfigException;
 import org.elasticsearch.common.ssl.SslConfiguration;
 import org.elasticsearch.common.ssl.SslConfigurationKeys;
 import org.elasticsearch.common.ssl.SslConfigurationLoader;
@@ -33,15 +33,15 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import javax.net.ssl.HostnameVerifier;
 import javax.net.ssl.SSLContext;
 
 import static org.elasticsearch.common.settings.Setting.simpleString;
 import static org.elasticsearch.common.settings.Setting.stringListSetting;
 
 /**
- * Loads "reindex.ssl.*" configuration from Settings, and makes the applicable configuration (trust manager / key manager / hostname
- * verification / cipher-suites) available for reindex-from-remote.
+ * Loads "reindex.ssl.*" configuration from Settings, and makes the applicable configuration (trust manager / key manager /
+ * cipher-suites) available for reindex-from-remote.
+ * Hostname verification is always enforced for remote HTTPS connections.
  */
 public class ReindexSslConfig {
 
@@ -107,6 +107,16 @@ public class ReindexSslConfig {
             }
         };
         configuration = loader.load(environment.configDir());
+        if (configuration.verificationMode().isHostnameVerificationEnabled() == false) {
+            throw new SslConfigException(
+                "reindex-from-remote requires hostname verification; setting ["
+                    + configuration.settingPrefix()
+                    + SslConfigurationKeys.VERIFICATION_MODE
+                    + "] to ["
+                    + configuration.verificationMode()
+                    + "] is not supported"
+            );
+        }
         reload();
 
         final FileChangesListener listener = new FileChangesListener() {
@@ -146,11 +156,8 @@ public class ReindexSslConfig {
      * configurations if the underlying key/certificate files are modified.
      */
     SSLIOSessionStrategy getStrategy() {
-        final HostnameVerifier hostnameVerifier = configuration.verificationMode().isHostnameVerificationEnabled()
-            ? new DefaultHostnameVerifier()
-            : new NoopHostnameVerifier();
         final String[] protocols = configuration.supportedProtocols().toArray(Strings.EMPTY_ARRAY);
         final String[] cipherSuites = configuration.getCipherSuites().toArray(Strings.EMPTY_ARRAY);
-        return new SSLIOSessionStrategy(context, protocols, cipherSuites, hostnameVerifier);
+        return new SSLIOSessionStrategy(context, protocols, cipherSuites, new DefaultHostnameVerifier());
     }
 }
