@@ -59,6 +59,10 @@ public final class PainlessLookupBuilder {
 
     private static final Pattern CLASS_NAME_PATTERN = Pattern.compile("^[_a-zA-Z][._a-zA-Z0-9]*$");
     private static final Pattern METHOD_AND_FIELD_NAME_PATTERN = Pattern.compile("^[_a-zA-Z][_a-zA-Z0-9]*$");
+    private static final String PAINLESS_API_PACKAGE_NAME = "org.elasticsearch.painless.api";
+    private static final String PAINLESS_API_PACKAGE_PREFIX = PAINLESS_API_PACKAGE_NAME + ".";
+    private static final Module PAINLESS_MODULE = PainlessLookupBuilder.class.getModule();
+    private static final ClassLoader PAINLESS_CLASS_LOADER = PainlessLookupBuilder.class.getClassLoader();
 
     public static PainlessLookup buildFromWhitelists(
         List<Whitelist> whitelists,
@@ -206,13 +210,27 @@ public final class PainlessLookupBuilder {
         return type == def.class || classesToPainlessClassBuilders.containsKey(type);
     }
 
+    private static Class<?> loadPainlessApiClass(String javaClassName) throws ClassNotFoundException {
+        if (javaClassName.startsWith(PAINLESS_API_PACKAGE_PREFIX) == false) {
+            throw new ClassNotFoundException(javaClassName);
+        }
+
+        Class<?> painlessApiClass = PAINLESS_CLASS_LOADER.loadClass(javaClassName);
+
+        if (painlessApiClass.getModule() != PAINLESS_MODULE || PAINLESS_API_PACKAGE_NAME.equals(painlessApiClass.getPackageName()) == false) {
+            throw new ClassNotFoundException(javaClassName);
+        }
+
+        return painlessApiClass;
+    }
+
     private static Class<?> loadClass(ClassLoader classLoader, String javaClassName, Supplier<String> errorMessage) {
         try {
-            return Class.forName(javaClassName, true, classLoader);
+            return classLoader.loadClass(javaClassName);
         } catch (ClassNotFoundException cnfe) {
             try {
-                // Painless provides some api classes that are available only through the painless implementation.
-                return Class.forName(javaClassName);
+                // Painless exposes a small API surface that extensions may whitelist from their own class loaders.
+                return loadPainlessApiClass(javaClassName);
             } catch (ClassNotFoundException cnfe2) {
                 IllegalArgumentException iae = new IllegalArgumentException(errorMessage.get(), cnfe2);
                 cnfe2.addSuppressed(cnfe);

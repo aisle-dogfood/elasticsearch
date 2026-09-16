@@ -12,6 +12,8 @@ package org.elasticsearch.painless;
 import org.elasticsearch.painless.lookup.PainlessLookup;
 import org.elasticsearch.painless.lookup.PainlessLookupBuilder;
 import org.elasticsearch.painless.lookup.PainlessMethod;
+import org.elasticsearch.painless.spi.Whitelist;
+import org.elasticsearch.painless.spi.WhitelistClass;
 import org.elasticsearch.painless.spi.WhitelistLoader;
 import org.elasticsearch.test.ESTestCase;
 import org.junit.Before;
@@ -319,5 +321,68 @@ public class LookupTests extends ESTestCase {
         assertNotNull(subMethods);
         assertEquals(1, subMethods.size());
         assertTrue(subMethods.contains(ADgetInt0));
+    }
+
+    public void testPainlessApiFallbackAllowsTrustedInternalClasses() {
+        ClassLoader restrictedLoader = new ClassLoader(null) {
+            @Override
+            protected Class<?> loadClass(String name, boolean resolve) throws ClassNotFoundException {
+                if (name.startsWith("java.")) {
+                    return super.loadClass(name, resolve);
+                }
+                throw new ClassNotFoundException(name);
+            }
+        };
+
+        PainlessLookup lookup = PainlessLookupBuilder.buildFromWhitelists(
+            List.of(singleClassWhitelist(restrictedLoader, "org.elasticsearch.painless.api.Debug")),
+            new HashMap<>(),
+            new HashMap<>()
+        );
+
+        assertSame(org.elasticsearch.painless.api.Debug.class, lookup.javaClassNameToClass("org.elasticsearch.painless.api.Debug"));
+    }
+
+    public void testPainlessApiFallbackRejectsNonApiClasses() {
+        ClassLoader restrictedLoader = new ClassLoader(null) {
+            @Override
+            protected Class<?> loadClass(String name, boolean resolve) throws ClassNotFoundException {
+                if (name.startsWith("java.")) {
+                    return super.loadClass(name, resolve);
+                }
+                throw new ClassNotFoundException(name);
+            }
+        };
+
+        IllegalArgumentException e = expectThrows(
+            IllegalArgumentException.class,
+            () -> PainlessLookupBuilder.buildFromWhitelists(
+                List.of(singleClassWhitelist(restrictedLoader, "org.elasticsearch.painless.LookupTests$A")),
+                new HashMap<>(),
+                new HashMap<>()
+            )
+        );
+
+        assertEquals("error loading whitelist(s) test", e.getMessage());
+        assertEquals("class [org.elasticsearch.painless.LookupTests$A] not found", e.getCause().getMessage());
+    }
+
+    private static Whitelist singleClassWhitelist(ClassLoader classLoader, String javaClassName) {
+        return new Whitelist(
+            classLoader,
+            List.of(
+                new WhitelistClass(
+                    "test",
+                    javaClassName,
+                    Collections.emptyList(),
+                    Collections.emptyList(),
+                    Collections.emptyList(),
+                    Collections.emptyList()
+                )
+            ),
+            Collections.emptyList(),
+            Collections.emptyList(),
+            Collections.emptyList()
+        );
     }
 }
